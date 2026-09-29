@@ -415,3 +415,10 @@ func NewAutoCloseProxyAdapter(adapter ProxyAdapter) ProxyAdapter {
 	runtime.SetFinalizer(proxy, (*autoCloseProxyAdapter).Close)
 	return proxy
 }
+
+// UnwrapProxyAdapter 返回被包装的原始 outbound。包装器内嵌的是接口，具体 outbound 的
+// 自有方法不在包装器的方法集上，外部（如 hub/route 的类型断言）必须经此穿透。
+// 不能命名为 Unwrap——ProxyAdapter 接口已保留 Unwrap(metadata, touch) 用于组提取。
+func (p *autoCloseProxyAdapter) UnwrapProxyAdapter() C.ProxyAdapter {
+	return p.ProxyAdapter
+}

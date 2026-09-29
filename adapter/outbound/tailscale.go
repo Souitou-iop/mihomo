@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/metacubex/tailscale/envknob"
 	"github.com/metacubex/tailscale/hostinfo"
 	"github.com/metacubex/tailscale/ipn"
+	"github.com/metacubex/tailscale/ipn/ipnstate"
 	"github.com/metacubex/tailscale/net/netmon"
 	"github.com/metacubex/tailscale/tailcfg"
 	"github.com/metacubex/tailscale/tsnet"
@@ -344,6 +346,95 @@ func tailscaleExitNodeNeedsStatus(option TailscaleOption) bool {
 	}
 	_, ok := ipn.ParseAutoExitNodeString(option.ExitNode)
 	return !ok
+}
+
+// TailscaleDevice is the status-safe subset exposed through mihomo's local API.
+type TailscaleDevice struct {
+	Name          string   `json:"name"`
+	DNSName       string   `json:"dnsName"`
+	Hostname      string   `json:"hostname"`
+	OS            string   `json:"os"`
+	IPs           []string `json:"ips"`
+	Online        bool     `json:"online"`
+	Active        bool     `json:"active"`
+	LastSeen      string   `json:"lastSeen,omitempty"`
+	LastHandshake string   `json:"lastHandshake,omitempty"`
+	Self          bool     `json:"self"`
+}
+
+type TailscaleStatus struct {
+	State          string            `json:"state"`
+	Tailnet        string            `json:"tailnet,omitempty"`
+	MagicDNSSuffix string            `json:"magicDnsSuffix,omitempty"`
+	IPs            []string          `json:"ips"`
+	Self           *TailscaleDevice  `json:"self,omitempty"`
+	Devices        []TailscaleDevice `json:"devices"`
+}
+
+// TailscaleStatus returns the local tsnet view. It is intentionally only
+// available while the outbound is alive; the Android UI clears it when mihomo stops.
+func (t *Tailscale) TailscaleStatus(ctx context.Context) (any, error) {
+	if err := t.ensureStarted(ctx); err != nil {
+		return nil, err
+	}
+	lc, err := t.server.LocalClient()
+	if err != nil {
+		return nil, err
+	}
+	status, err := lc.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := TailscaleStatus{
+		State:   status.BackendState,
+		IPs:     make([]string, 0, len(status.TailscaleIPs)),
+		Devices: make([]TailscaleDevice, 0, len(status.Peer)),
+	}
+	for _, ip := range status.TailscaleIPs {
+		result.IPs = append(result.IPs, ip.String())
+	}
+	if status.CurrentTailnet != nil {
+		result.Tailnet = status.CurrentTailnet.Name
+		result.MagicDNSSuffix = status.CurrentTailnet.MagicDNSSuffix
+	}
+	toDevice := func(peer *ipnstate.PeerStatus, self bool) TailscaleDevice {
+		device := TailscaleDevice{
+			DNSName:  strings.TrimSuffix(peer.DNSName, "."),
+			Hostname: peer.HostName,
+			OS:       peer.OS,
+			Online:   peer.Online,
+			Active:   peer.Active,
+			Self:     self,
+		}
+		for _, ip := range peer.TailscaleIPs {
+			device.IPs = append(device.IPs, ip.String())
+		}
+		device.Name = device.DNSName
+		if device.Name == "" {
+			device.Name = device.Hostname
+		}
+		if !peer.LastSeen.IsZero() {
+			device.LastSeen = peer.LastSeen.UTC().Format(time.RFC3339)
+		}
+		if !peer.LastHandshake.IsZero() {
+			device.LastHandshake = peer.LastHandshake.UTC().Format(time.RFC3339)
+		}
+		return device
+	}
+	if status.Self != nil {
+		self := toDevice(status.Self, true)
+		// 本 fork 的 ipn.State 是整数枚举，string(ipn.Running) 会得到控制字符而非 "Running"。
+		self.Online = status.BackendState == ipn.Running.String()
+		result.Self = &self
+	}
+	for _, peer := range status.Peer {
+		result.Devices = append(result.Devices, toDevice(peer, false))
+	}
+	sort.Slice(result.Devices, func(i, j int) bool {
+		return result.Devices[i].Name < result.Devices[j].Name
+	})
+	return result, nil
 }
 
 func (t *Tailscale) DialContext(ctx context.Context, metadata *C.Metadata) (_ C.Conn, err error) {
