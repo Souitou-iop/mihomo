@@ -193,6 +193,7 @@ func (t *Tailscale) start() error {
 			return
 		}
 		t.serverStarted = true
+		t.retryNoStateLogin()
 		ctx, cancel := context.WithTimeout(t.ctx, 30*time.Second)
 		defer cancel()
 		if err := t.applyPrefs(ctx); err != nil {
@@ -203,6 +204,28 @@ func (t *Tailscale) start() error {
 		go t.watchBackendState()
 	})
 	return t.startErr
+}
+
+// tsnet consumes the configured auth key only when the backend lands in
+// NeedsLogin; a persisted NoState profile makes it skip the login and the
+// outbound then dials without credentials forever. Kick the login ourselves
+// when that exact state is observed right after Start.
+func (t *Tailscale) retryNoStateLogin() {
+	if t.option.AuthKey == "" {
+		return
+	}
+	lc, err := t.server.LocalClient()
+	if err != nil {
+		return
+	}
+	status, err := lc.Status(t.ctx)
+	if err != nil || status == nil || status.BackendState != "NoState" {
+		return
+	}
+	log.Infoln("[Tailscale](%s) backend state is NoState; re-triggering login with auth key", t.Name())
+	if err := lc.StartLoginInteractive(t.ctx); err != nil {
+		log.Warnln("[Tailscale](%s) re-trigger login: %v", t.Name(), err)
+	}
 }
 
 func (t *Tailscale) ensureStarted(ctx context.Context) error {
