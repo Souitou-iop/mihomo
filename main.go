@@ -61,6 +61,12 @@ func getIntEnv(key string) int {
 	return intValue
 }
 
+func getBoolEnv(key string) bool {
+	value := os.Getenv(key)
+	parsed, _ := strconv.ParseBool(value)
+	return parsed
+}
+
 func init() {
 	flag.StringVar(&homeDir, "d", os.Getenv("CLASH_HOME_DIR"), "set configuration directory")
 	flag.StringVar(&configFile, "f", os.Getenv("CLASH_CONFIG_FILE"), "specify configuration file")
@@ -80,6 +86,7 @@ func init() {
 	flag.BoolVar(&version, "v", false, "show current version of mihomo")
 	flag.BoolVar(&testConfig, "t", false, "test configuration and exit")
 	flag.BoolVar(&prefetch, "prefetch", false, "prefetch all HTTP providers to local cache and exit (mishka tag only)")
+	flag.BoolVar(&config.DomesticDirect, "domestic-direct", getBoolEnv("MIHOMO_DOMESTIC_DIRECT"), "prepend domestic-direct rules to the subscription rules (mishka tag only)")
 	flag.Parse()
 }
 

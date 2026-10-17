@@ -481,6 +481,12 @@ var OverrideJSONPath string
 // Registered via init() in patch_mishka.go when built with the mishka tag; nil otherwise.
 var mishkaPatch func(cfg *RawConfig)
 
+// DomesticDirect prepends domestic-direct rules to the subscription rules.
+// Set via the --domestic-direct CLI flag (see main.go). Without the mishka build
+// tag the flag is accepted but has no effect, since the rule builder lives in
+// patch_mishka.go.
+var DomesticDirect bool
+
 // Parse config
 func Parse(buf []byte) (*Config, error) {
 	rawCfg, err := UnmarshalRawConfig(buf)
